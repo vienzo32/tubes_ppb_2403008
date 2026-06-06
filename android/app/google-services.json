@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "494162843346",
+    "project_id": "animeport-7faaa",
+    "storage_bucket": "animeport-7faaa.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:494162843346:android:b39d6899e82f5046503f0b",
+        "android_client_info": {
+          "package_name": "com.example.anime_port"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCVjpXzytKuTNiPYTAYJz_yfyW2EUtVqTc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
