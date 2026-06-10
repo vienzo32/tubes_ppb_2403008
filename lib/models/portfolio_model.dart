@@ -35,7 +35,6 @@ class PortfolioModel {
     this.rank,
   });
 
-  // Getter untuk mendapatkan full URL gambar
   String get imageUrl {
     if (imagePath.isEmpty) return '';
     if (imagePath.startsWith('http')) return imagePath;
