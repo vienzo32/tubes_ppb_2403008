@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import '../utils/app_colors.dart';
 import '../utils/shared_pref_helper.dart';
 import '../widgets/custom_button.dart';
@@ -10,7 +8,6 @@ import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import 'home_screen.dart';
 import 'register_screen.dart';
-import 'role_selection_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -28,13 +25,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   String? _emailError;
   String? _passwordError;
   bool _rememberMe = false;
-  bool _isGoogleLoading = false;
   
   final FocusNode _emailFocusNode = FocusNode();
   final FocusNode _passwordFocusNode = FocusNode();
 
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final List<Map<String, String>> _demoAccounts = [
+    {'email': 'test@animeport.com', 'password': '123456', 'role': 'Mahasiswa', 'name': 'Test User'},
+    {'email': 'rina.dosen@animeport.com', 'password': '123456', 'role': 'Dosen', 'name': 'Rina'},
+    {'email': 'maya.hrd@animeport.com', 'password': '123456', 'role': 'HRD', 'name': 'Maya'},
+  ];
 
   @override
   void initState() {
@@ -53,15 +52,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   void _loadSavedData() async {
     final rememberMe = SharedPrefHelper.getRememberEmail();
-    setState(() {
-      _rememberMe = rememberMe;
-    });
-    
+    setState(() => _rememberMe = rememberMe);
     if (rememberMe) {
       final savedEmail = SharedPrefHelper.getSavedEmail();
-      if (savedEmail.isNotEmpty) {
-        _emailController.text = savedEmail;
-      }
+      if (savedEmail.isNotEmpty) _emailController.text = savedEmail;
     }
   }
 
@@ -96,23 +90,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Future<void> _handleLogin() async {
     final isEmailValid = _validateEmail();
     final isPasswordValid = _validatePassword();
-    
-    if (!isEmailValid || !isPasswordValid) {
-      return;
-    }
+    if (!isEmailValid || !isPasswordValid) return;
     
     setState(() => _isLoading = true);
-    
-    final result = await ApiService.login(
-      _emailController.text.trim(),
-      _passwordController.text,
-    );
-    
+    final result = await ApiService.login(_emailController.text.trim(), _passwordController.text);
     setState(() => _isLoading = false);
     
     if (result['success'] == true) {
       final user = result['user'];
-      
       await SharedPrefHelper.setLoggedIn(true);
       await SharedPrefHelper.setUserId(user['id']);
       await SharedPrefHelper.setUserEmail(user['email']);
@@ -136,113 +121,30 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       }
       
       if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const HomeScreen()),
-        );
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const HomeScreen()));
       }
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result['message'] ?? 'Email atau password salah!'),
-            backgroundColor: AppColors.error,
-            duration: const Duration(seconds: 2),
-          ),
+          SnackBar(content: Text(result['message'] ?? 'Email atau password salah!'), backgroundColor: AppColors.error),
         );
       }
     }
   }
 
-  // ============ GOOGLE SIGN IN (REAL) ============
-  Future<void> _handleGoogleSignIn() async {
-    setState(() => _isGoogleLoading = true);
+  void _showNotAvailableSnackbar() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Fitur ini belum tersedia'), backgroundColor: AppColors.warning),
+    );
+  }
 
-    try {
-      // Sign out first to ensure account picker appears
-      await _googleSignIn.signOut();
-      
-      // Trigger Google Sign-In
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      
-      if (googleUser == null) {
-        setState(() => _isGoogleLoading = false);
-        return; // User cancelled
-      }
-      
-      // Get authentication details
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-      
-      // Create Firebase credential
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-      
-      // Sign in to Firebase
-      final UserCredential userCredential = await _auth.signInWithCredential(credential);
-      final User? firebaseUser = userCredential.user;
-      
-      if (firebaseUser != null) {
-        final email = firebaseUser.email ?? '';
-        final name = firebaseUser.displayName ?? 'User';
-        final photoUrl = firebaseUser.photoURL;
-        
-        // Cek apakah user sudah terdaftar di database lokal
-        final checkResult = await ApiService.login(email, 'google_oauth_$email');
-        
-        if (checkResult['success'] == true) {
-          // User sudah ada, langsung login
-          final user = checkResult['user'];
-          await SharedPrefHelper.setLoggedIn(true);
-          await SharedPrefHelper.setUserId(user['id']);
-          await SharedPrefHelper.setUserEmail(email);
-          await SharedPrefHelper.setUserName(name);
-          await SharedPrefHelper.setUserRole(user['role']);
-          
-          ref.read(authProvider.notifier).state = AuthState(
-            isLoggedIn: true,
-            userId: user['id'],
-            userEmail: email,
-            userName: name,
-            userRole: user['role'],
-          );
-          
-          if (mounted) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const HomeScreen()),
-            );
-          }
-        } else {
-          // User baru, perlu pilih role
-          if (mounted) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (context) => RoleSelectionScreen(
-                  email: email,
-                  name: name,
-                  photoUrl: photoUrl,
-                ),
-              ),
-            );
-          }
-        }
-      }
-    } catch (e) {
-      print('Google Sign-In error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Google Sign-In gagal: $e'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
-    } finally {
-      setState(() => _isGoogleLoading = false);
-    }
+  void _fillDemoAccount(String email, String password) {
+    setState(() {
+      _emailController.text = email;
+      _passwordController.text = password;
+      _emailError = null;
+      _passwordError = null;
+    });
   }
 
   @override
@@ -257,8 +159,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 20),
-              
-              // Logo / Title
               Center(
                 child: Column(
                   children: [
@@ -268,105 +168,39 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       decoration: BoxDecoration(
                         gradient: AppColors.primaryGradient,
                         shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.primary.withValues(alpha: 0.3),
-                            blurRadius: 20,
-                            offset: const Offset(0, 10),
-                          ),
-                        ],
+                        boxShadow: [BoxShadow(color: AppColors.primary.withValues(alpha: 0.3), blurRadius: 20, offset: const Offset(0, 10))],
                       ),
-                      child: const Center(
-                        child: Icon(
-                          Icons.brush,
-                          size: 50,
-                          color: Colors.white,
-                        ),
-                      ),
+                      child: const Center(child: Icon(Icons.brush, size: 50, color: Colors.white)),
                     ),
                     const SizedBox(height: 20),
-                    Text(
-                      'AnimePort',
-                      style: GoogleFonts.poppins(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
+                    Text('AnimePort', style: GoogleFonts.poppins(fontSize: 32, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
                     const SizedBox(height: 8),
-                    Text(
-                      'Tunjukkan Karya Animemu ✨',
-                      style: GoogleFonts.poppins(
-                        fontSize: 14,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
+                    Text('Tunjukkan Karya Animemu ✨', style: GoogleFonts.poppins(fontSize: 14, color: AppColors.textSecondary)),
                   ],
                 ),
               ),
-              
               const SizedBox(height: 40),
-              
-              // Form Login
-              Text(
-                'Login',
-                style: GoogleFonts.poppins(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              
+              Text('Login', style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
               const SizedBox(height: 8),
-              
-              Text(
-                'Masuk untuk melanjutkan ke AnimePort',
-                style: GoogleFonts.poppins(
-                  fontSize: 14,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-              
+              Text('Masuk untuk melanjutkan ke AnimePort', style: GoogleFonts.poppins(fontSize: 14, color: AppColors.textSecondary)),
               const SizedBox(height: 30),
-              
-              // Email field
               TextField(
                 controller: _emailController,
                 focusNode: _emailFocusNode,
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
-                onEditingComplete: () {
-                  _validateEmail();
-                  FocusScope.of(context).requestFocus(_passwordFocusNode);
-                },
+                onEditingComplete: () { _validateEmail(); FocusScope.of(context).requestFocus(_passwordFocusNode); },
                 decoration: InputDecoration(
-                  labelText: 'Email',
-                  hintText: 'contoh@gmail.com',
-                  errorText: _emailError,
+                  labelText: 'Email', hintText: 'contoh@gmail.com', errorText: _emailError,
                   prefixIcon: const Icon(Icons.email_outlined, color: AppColors.textSecondary),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.textHint),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.textHint),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.primary, width: 2),
-                  ),
-                  errorBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.error),
-                  ),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.textHint)),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.textHint)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.primary, width: 2)),
+                  errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.error)),
                   labelStyle: GoogleFonts.poppins(),
                 ),
               ),
-              
               const SizedBox(height: 16),
-              
-              // Password field
               TextField(
                 controller: _passwordController,
                 focusNode: _passwordFocusNode,
@@ -374,44 +208,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 textInputAction: TextInputAction.done,
                 onEditingComplete: _handleLogin,
                 decoration: InputDecoration(
-                  labelText: 'Password',
-                  hintText: 'Masukkan password',
-                  errorText: _passwordError,
+                  labelText: 'Password', hintText: 'Masukkan password', errorText: _passwordError,
                   prefixIcon: const Icon(Icons.lock_outline, color: AppColors.textSecondary),
                   suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePassword ? Icons.visibility_off : Icons.visibility,
-                      color: AppColors.textSecondary,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _obscurePassword = !_obscurePassword;
-                      });
-                    },
+                    icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility, color: AppColors.textSecondary),
+                    onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                   ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.textHint),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.textHint),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.primary, width: 2),
-                  ),
-                  errorBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.error),
-                  ),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.textHint)),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.textHint)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.primary, width: 2)),
+                  errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.error)),
                   labelStyle: GoogleFonts.poppins(),
                 ),
               ),
-              
               const SizedBox(height: 12),
-              
-              // Lupa password & Remember Me
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -419,177 +229,152 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     children: [
                       Checkbox(
                         value: _rememberMe,
-                        onChanged: (value) {
-                          setState(() {
-                            _rememberMe = value ?? false;
-                          });
-                        },
-                        activeColor: AppColors.primary,
-                        checkColor: Colors.white,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        onChanged: (value) => setState(() => _rememberMe = value ?? false),
+                        activeColor: AppColors.primary, checkColor: Colors.white,
                       ),
-                      Text(
-                        'Ingat Saya',
-                        style: GoogleFonts.poppins(
-                          color: AppColors.textSecondary,
-                          fontSize: 12,
-                        ),
-                      ),
+                      Text('Ingat Saya', style: GoogleFonts.poppins(color: AppColors.textSecondary, fontSize: 12)),
                     ],
                   ),
                   TextButton(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Fitur lupa password segera hadir!'),
-                        ),
-                      );
-                    },
-                    style: TextButton.styleFrom(
-                      padding: EdgeInsets.zero,
-                      minimumSize: const Size(0, 0),
-                    ),
-                    child: Text(
-                      'Lupa Password?',
-                      style: GoogleFonts.poppins(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w500,
-                        fontSize: 12,
-                      ),
-                    ),
+                    onPressed: _showNotAvailableSnackbar,
+                    style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 0)),
+                    child: Text('Lupa Password?', style: GoogleFonts.poppins(color: AppColors.primary, fontWeight: FontWeight.w500, fontSize: 12)),
                   ),
                 ],
               ),
-              
               const SizedBox(height: 16),
-              
-              // Button Login (Email)
-              CustomButton(
-                text: 'Login',
-                onPressed: _handleLogin,
-                isLoading: _isLoading,
-                icon: Icons.login,
-              ),
-              
+              CustomButton(text: 'Login', onPressed: _handleLogin, isLoading: _isLoading, icon: Icons.login),
               const SizedBox(height: 20),
-              
-              // Atau login dengan
               Row(
                 children: [
                   const Expanded(child: Divider()),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
-                      'atau login dengan',
-                      style: GoogleFonts.poppins(
-                        color: AppColors.textSecondary,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
+                  Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text('atau login dengan', style: GoogleFonts.poppins(color: AppColors.textSecondary, fontSize: 12))),
                   const Expanded(child: Divider()),
                 ],
               ),
-              
               const SizedBox(height: 20),
-              
-              // Google Login Button (REAL)
               InkWell(
-                onTap: _isGoogleLoading ? null : _handleGoogleSignIn,
+                onTap: _showNotAvailableSnackbar,
                 borderRadius: BorderRadius.circular(12),
                 child: Container(
                   height: 50,
                   decoration: BoxDecoration(
                     color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
-                      width: 1,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.05),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
+                    border: Border.all(color: isDark ? Colors.grey[700]! : Colors.grey[300]!, width: 1),
                   ),
                   child: Center(
-                    child: _isGoogleLoading
-                        ? SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: AppColors.primary,
-                            ),
-                          )
-                        : Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              // Google Logo
-                              Container(
-                                width: 24,
-                                height: 24,
-                                decoration: const BoxDecoration(
-                                  image: DecorationImage(
-                                    image: NetworkImage(
-                                      'https://cdn-icons-png.flaticon.com/512/281/281764.png',
-                                    ),
-                                    fit: BoxFit.contain,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Text(
-                                'Lanjutkan dengan Google',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w500,
-                                  color: isDark ? Colors.white : AppColors.textPrimary,
-                                ),
-                              ),
-                            ],
-                          ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(width: 24, height: 24, decoration: const BoxDecoration(image: DecorationImage(image: NetworkImage('https://cdn-icons-png.flaticon.com/512/281/281764.png'), fit: BoxFit.contain))),
+                        const SizedBox(width: 12),
+                        Text('Lanjutkan dengan Google', style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w500, color: isDark ? Colors.white : AppColors.textPrimary)),
+                      ],
+                    ),
                   ),
                 ),
               ),
-              
               const SizedBox(height: 24),
-              
-              // Register link
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(
-                    'Belum punya akun? ',
-                    style: GoogleFonts.poppins(
-                      color: AppColors.textSecondary,
-                      fontSize: 13,
-                    ),
-                  ),
+                  Text('Belum punya akun? ', style: GoogleFonts.poppins(color: AppColors.textSecondary, fontSize: 13)),
                   GestureDetector(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => const RegisterScreen()),
-                      );
-                    },
-                    child: Text(
-                      'Daftar Sekarang',
-                      style: GoogleFonts.poppins(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                      ),
-                    ),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const RegisterScreen())),
+                    child: Text('Daftar Sekarang', style: GoogleFonts.poppins(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 13)),
                   ),
                 ],
+              ),
+              const SizedBox(height: 24),
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(colors: [AppColors.primary.withValues(alpha: 0.1), AppColors.secondary.withValues(alpha: 0.05)]),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          Icon(Icons.school, color: AppColors.primary, size: 18),
+                          const SizedBox(width: 8),
+                          Text('Akun Demo', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.primary)),
+                          const Spacer(),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(20)),
+                            child: Text('Klik untuk isi otomatis', style: GoogleFonts.poppins(fontSize: 10, color: AppColors.primary)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 0, thickness: 1),
+                    ..._demoAccounts.map((account) => _buildDemoAccountTile(
+                      email: account['email']!, password: account['password']!, role: account['role']!, name: account['name']!,
+                    )),
+                  ],
+                ),
               ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Widget _buildDemoAccountTile({required String email, required String password, required String role, required String name}) {
+    return InkWell(
+      onTap: () => _fillDemoAccount(email, password),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(color: _getRoleColor(role).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
+              child: Icon(role == 'Mahasiswa' ? Icons.person : (role == 'Dosen' ? Icons.school : Icons.business), size: 20, color: _getRoleColor(role)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(color: _getRoleColor(role), borderRadius: BorderRadius.circular(8)),
+                        child: Text(role, style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.w500)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(email, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.1), shape: BoxShape.circle),
+              child: Icon(Icons.copy, size: 14, color: AppColors.primary),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color _getRoleColor(String role) {
+    switch (role) {
+      case 'Mahasiswa': return Colors.blue;
+      case 'Dosen': return Colors.green;
+      case 'HRD': return Colors.orange;
+      default: return Colors.grey;
+    }
   }
 }
