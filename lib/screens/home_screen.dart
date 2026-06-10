@@ -21,7 +21,7 @@ class HomeScreen extends ConsumerWidget {
       );
     }
   }
-
+// hasil dari fungsi ini adalah untuk mendapatkan pesan selamat datang yang sesuai dengan peran pengguna. Pesan ini akan ditampilkan di banner selamat datang di layar utama, memberikan pengalaman yang lebih personal dan relevan bagi setiap jenis pengguna (mahasiswa, dosen, hrd).
   String _getWelcomeMessage(String role) {
     switch (role) {
       case 'mahasiswa':
