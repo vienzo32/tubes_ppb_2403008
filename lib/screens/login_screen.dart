@@ -95,7 +95,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     setState(() => _isLoading = true);
     final result = await ApiService.login(_emailController.text.trim(), _passwordController.text);
     setState(() => _isLoading = false);
-    //sharedpreference
+    //sharedpreference di sini
     if (result['success'] == true) {
       final user = result['user'];
       await SharedPrefHelper.setLoggedIn(true);
